@@ -1,4 +1,4 @@
-import type { NameMapping } from "./ReplacementRule";
+import type { NameMapping } from "./interfaces";
 
 interface PatternSegment {
     type: 'literal' | 'regex' | 'nameSlot';
@@ -102,7 +102,7 @@ function buildMatchingPattern(segments: PatternSegment[], nameMappingKeys: strin
     for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
         if (!segment) continue;
-        
+
         if (segment.type === 'literal') {
             // Escape special regex characters
             patternParts.push(segment.content.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
@@ -124,7 +124,7 @@ function buildMatchingPattern(segments: PatternSegment[], nameMappingKeys: strin
 
     patternParts.push('$');
     const pattern = new RegExp(patternParts.join(''));
-    
+
     return { pattern, nameSlotIndices };
 }
 
@@ -137,13 +137,13 @@ function matchNameCharacters(
 ): string[] {
     const results: string[] = [];
     let remaining = nameChars;
-    
+
     // Sort mappings by key length (longest first) for greedy matching
     const sortedMappings = [...nameMappings].sort((a, b) => b.key.length - a.key.length);
 
     while (remaining.length > 0) {
         let matched = false;
-        
+
         for (const mapping of sortedMappings) {
             if (remaining.startsWith(mapping.key)) {
                 results.push(mapping.value);
@@ -152,13 +152,13 @@ function matchNameCharacters(
                 break;
             }
         }
-        
+
         if (!matched) {
             // No mapping found for this character, skip it
             remaining = remaining.slice(1);
         }
     }
-    
+
     return results;
 }
 
@@ -172,14 +172,14 @@ export function matchPattern(
 ): { matched: boolean; matchedNames: string[] } {
     const segments = parseKey(key);
     const hasNameSlot = segments.some(s => s.type === 'nameSlot');
-    
+
     if (!hasNameSlot) {
         return { matched: false, matchedNames: [] };
     }
 
     const nameMappingKeys = nameMappings.map(m => m.key);
     const { pattern, nameSlotIndices } = buildMatchingPattern(segments, nameMappingKeys);
-    
+
     const match = input.match(pattern);
     if (!match) {
         return { matched: false, matchedNames: [] };
@@ -196,7 +196,7 @@ export function matchPattern(
             }
         }
     }
-    
+
     return { matched: false, matchedNames: [] };
 }
 
@@ -207,7 +207,7 @@ export function expandValue(value: string, names: string[]): string {
     if (names.length === 0) {
         return value.replace(/<p>/g, '');
     }
-    
+
     const namesText = names.join(', ');
     return value.replace(/<p>/g, namesText);
 }
