@@ -185,29 +185,62 @@ export function matchPattern(
         return { matched: false, matchedNames: [] };
     }
 
-    // Extract name characters from the first name slot
-    if (nameSlotIndices.length > 0) {
-        const nameSlotIndex = nameSlotIndices[0];
+    // Extract name characters from all name slots and combine them
+    const allMatchedNames: string[] = [];
+    for (const nameSlotIndex of nameSlotIndices) {
         if (nameSlotIndex !== undefined) {
             const nameChars = match[nameSlotIndex];
             if (nameChars) {
                 const matchedNames = matchNameCharacters(nameChars, nameMappings);
-                return { matched: true, matchedNames };
+                allMatchedNames.push(...matchedNames);
             }
         }
+    }
+
+    if (allMatchedNames.length > 0) {
+        return { matched: true, matchedNames: allMatchedNames };
     }
 
     return { matched: false, matchedNames: [] };
 }
 
 /**
- * Expands a value template by replacing <p> with comma-separated names
+ * Expands a value template by replacing <p> with names
+ * For patterns with multiple name slots, first <p> gets first name, subsequent <p> get comma-separated remaining names
  */
 export function expandValue(value: string, names: string[]): string {
     if (names.length === 0) {
         return value.replace(/<p>/g, '');
     }
 
+    // Count how many <p> placeholders we have
+    const placeholderCount = (value.match(/<p>/g) || []).length;
+    
+    if (placeholderCount === 1) {
+        // Single placeholder: use all names comma-separated
+        const namesText = names.join(', ');
+        return value.replace(/<p>/, namesText);
+    } else if (placeholderCount > 1 && names.length > 0) {
+        // Multiple placeholders: first gets first name, rest get comma-separated remaining names
+        let result = value;
+        const firstPlaceholder = result.indexOf('<p>');
+        if (firstPlaceholder !== -1) {
+            result = result.slice(0, firstPlaceholder) + names[0] + result.slice(firstPlaceholder + 3);
+        }
+        
+        // Remaining placeholders get comma-separated remaining names
+        const remainingNames = names.slice(1);
+        if (remainingNames.length > 0) {
+            const remainingNamesText = remainingNames.join(', ');
+            result = result.replace(/<p>/g, remainingNamesText);
+        } else {
+            result = result.replace(/<p>/g, '');
+        }
+        
+        return result;
+    }
+
+    // Fallback: replace all with comma-separated names
     const namesText = names.join(', ');
     return value.replace(/<p>/g, namesText);
 }
