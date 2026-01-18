@@ -2,6 +2,8 @@
 import { ref, computed, nextTick, onMounted, watch } from 'vue';
 import { VApp, VBtn, VCard, VCardActions, VCardText, VChip, VCol, VContainer, VDivider, VFadeTransition, VList, VListItem, VMain, VRow, VSlideYTransition, VSpacer, VTextarea, VTextField, VToolbar, VToolbarTitle } from 'vuetify/components';
 import { mappings } from '@/assets/mappings'
+import { nameMappings } from '@/assets/nameMappings'
+import { matchPattern, expandValue } from '@/lib/patternMatcher'
 
 
 // --- Constants ---
@@ -67,6 +69,20 @@ const handleInput = async (event: any): Promise<void> => {
     for (const rule of mappings.value) {
       const key = rule.key.trim();
       if (!key) continue;
+
+      // Check for <p> or <p,> pattern (name slot)
+      const hasNameSlot = key.includes('<p,>') || key.includes('<p>');
+      
+      if (hasNameSlot) {
+        const matchResult = matchPattern(lastWord, key, nameMappings.value);
+        if (matchResult.matched) {
+          matchFound = true;
+          replacementText = expandValue(rule.value, matchResult.matchedNames);
+          matchedKeyText = lastWord;
+          break;
+        }
+        continue; // Skip to next rule if name slot pattern didn't match
+      }
 
       const isRegex = key.startsWith('/') && key.lastIndexOf('/') > 0;
 
@@ -156,7 +172,7 @@ const handleInput = async (event: any): Promise<void> => {
       </VCol>
 
       <VCol cols="12" md="4">
-        <VCard variant="outlined" class="rounded-lg">
+        <VCard variant="outlined" class="rounded-lg mb-4">
           <VToolbar color="grey-lighten-4" flat>
             <VToolbarTitle class="text-subtitle-1 font-weight-bold">
               Replacements
@@ -172,9 +188,38 @@ const handleInput = async (event: any): Promise<void> => {
                   <div class="d-flex align-center">
                     <div class="flex-grow-1">
                       <VTextField v-model="item.key" label="Key (or /regex/)" density="compact" variant="underlined"
-                        hide-details class="mb-1 font-weight-bold font-mono" placeholder="e.g. /h.llo/"></VTextField>
+                        hide-details class="mb-1 font-weight-bold font-mono" placeholder="e.g. /h.llo/ or d<p,>t"></VTextField>
                       <VTextField v-model="item.value" label="Replacement Value" density="compact" variant="underlined"
-                        hide-details placeholder="Text to insert"></VTextField>
+                        hide-details placeholder="Text to insert (use <p> for names)"></VTextField>
+                    </div>
+                  </div>
+                </VCard>
+              </VListItem>
+            </VSlideYTransition>
+          </VList>
+
+          <VDivider></VDivider>
+          <VCardActions class="pa-4">
+          </VCardActions>
+        </VCard>
+
+        <VCard variant="outlined" class="rounded-lg">
+          <VToolbar color="grey-lighten-4" flat>
+            <VToolbarTitle class="text-subtitle-1 font-weight-bold">
+              Name Mappings
+            </VToolbarTitle>
+          </VToolbar>
+
+          <VList class="pa-4" style="max-height: 500px; overflow-y: auto;">
+            <VSlideYTransition group>
+              <VListItem v-for="(item, index) in nameMappings" :key="index" class="pa-0 mb-4">
+                <VCard variant="flat" border class="pa-2 w-100 bg-grey-lighten-5">
+                  <div class="d-flex align-center">
+                    <div class="flex-grow-1">
+                      <VTextField v-model="item.key" label="Key" density="compact" variant="underlined"
+                        hide-details class="mb-1 font-weight-bold font-mono" placeholder="e.g. i"></VTextField>
+                      <VTextField v-model="item.value" label="Name" density="compact" variant="underlined"
+                        hide-details placeholder="e.g. izzy"></VTextField>
                     </div>
                   </div>
                 </VCard>
