@@ -1,51 +1,24 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch, computed } from 'vue';
-import { useTheme } from 'vuetify';
-import { VContainer, VRow, VCol, VCard, VCardText, VBtn, VDivider, VChip, VSwitch, VIcon } from 'vuetify/components';
-import DateField from './fields/DateField.vue';
-import YesNoField from './fields/YesNoField.vue';
-import TimeField from './fields/TimeField.vue';
-import FloatField from './fields/FloatField.vue';
-import IntField from './fields/IntField.vue';
-import StringField from './fields/StringField.vue';
-import ListField from './fields/ListField.vue';
-import PatternTextField from './fields/PatternTextField.vue';
-import TimeDisplay from './fields/TimeDisplay.vue';
-import AutocompleteField from './fields/AutocompleteField.vue';
-import AutocompleteListField from './fields/AutocompleteListField.vue';
+import { ref, onMounted, nextTick, watch } from 'vue';
+import { VContainer, VRow, VCol, VCard, VCardText, VBtn, VDivider, VChip, VIcon } from 'vuetify/components';
+import DateField from '@/components/fields/DateField.vue';
+import YesNoField from '@/components/fields/YesNoField.vue';
+import TimeField from '@/components/fields/TimeField.vue';
+import FloatField from '@/components/fields/FloatField.vue';
+import IntField from '@/components/fields/IntField.vue';
+import StringField from '@/components/fields/StringField.vue';
+import ListField from '@/components/fields/ListField.vue';
+import PatternTextField from '@/components/fields/PatternTextField.vue';
+import TimeDisplay from '@/components/fields/TimeDisplay.vue';
+import AutocompleteField from '@/components/fields/AutocompleteField.vue';
+import AutocompleteListField from '@/components/fields/AutocompleteListField.vue';
 import { exerciseSuggestions } from '@/assets/exerciseSuggestions';
 import { musicSuggestions } from '@/assets/musicSuggestions';
 import { phaseSuggestions } from '@/assets/phaseSuggestions';
 import { gameSuggestions } from '@/assets/gameSuggestions';
+import { getTodayDate } from '@/lib/fieldUtils';
 
 const STORAGE_KEY = 'daily_tracking_form_data';
-const THEME_KEY = 'daily_tracking_theme';
-
-// Dark mode
-const theme = useTheme();
-// Initialize from localStorage or default to dark
-const getInitialTheme = () => {
-  try {
-    const saved = localStorage.getItem(THEME_KEY);
-    return saved === 'light' ? 'light' : 'dark';
-  } catch {
-    return 'dark';
-  }
-};
-const isDark = ref(getInitialTheme() === 'dark');
-
-// Set initial theme
-theme.global.name.value = isDark.value ? 'dark' : 'light';
-
-const toggleTheme = (val: boolean) => {
-  isDark.value = val;
-  theme.global.name.value = isDark.value ? 'dark' : 'light';
-  try {
-    localStorage.setItem(THEME_KEY, isDark.value ? 'dark' : 'light');
-  } catch (err) {
-    console.error('Failed to save theme:', err);
-  }
-};
 
 // Form data
 const formData = ref({
@@ -59,7 +32,7 @@ const formData = ref({
   music: 'N',
   grateful: [] as string[],
   learn: [] as string[],
-  exercise: [] as string[],
+  exercise: '',
   remember: 0,
   dayRating: 0,
   feeling: 0,
@@ -97,16 +70,10 @@ watch(formData, () => {
   saveFormData();
 }, { deep: true });
 
-// Set date to today
 const setDateToToday = () => {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-  formData.value.date = `${year}-${month}-${day}`;
+  formData.value.date = getTodayDate();
 };
 
-// Clear form
 const clearForm = () => {
   formData.value = {
     date: '',
@@ -158,28 +125,6 @@ const happenedFieldRef = ref<InstanceType<typeof PatternTextField> | null>(null)
 const timeDisplayRef = ref<InstanceType<typeof TimeDisplay> | null>(null);
 const dayNameFieldRef = ref<InstanceType<typeof StringField> | null>(null);
 
-// Field labels for validation
-const fieldLabels: Record<string, string> = {
-  date: 'Date',
-  bathe: 'Bathe',
-  wake: 'Wake',
-  sleep: 'Sleep',
-  stress: 'Stress',
-  tired: 'Tired',
-  game: 'Game',
-  music: 'Music',
-  grateful: 'Grateful',
-  learn: 'Learn',
-  exercise: 'Exercise',
-  remember: 'Remember',
-  dayRating: 'Day rating',
-  feeling: 'Feeling',
-  why: 'Why',
-  phase: 'Phase',
-  happened: 'Happened'
-};
-
-// Map error labels to field refs
 const errorToFieldRef: Record<string, () => void> = {
   'Date': () => dateFieldRef.value?.focus(),
   'Bathe': () => batheFieldRef.value?.focus(),
@@ -206,7 +151,6 @@ const focusFieldByError = (errorLabel: string) => {
   }
 };
 
-// Validation errors
 const validationErrors = ref<string[]>([]);
 
 const validateForm = () => {
@@ -259,7 +203,14 @@ const focusOrder = [
   () => dayNameFieldRef.value?.focus()
 ];
 
-// Navigation functions
+const scrollToActiveElement = async () => {
+  await nextTick();
+  const activeElement = document.activeElement;
+  if (activeElement) {
+    activeElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+};
+
 const moveToNextField = async (currentIndex: number) => {
   const nextIndex = currentIndex + 1;
   if (nextIndex < focusOrder.length) {
@@ -267,12 +218,7 @@ const moveToNextField = async (currentIndex: number) => {
     const focusFn = focusOrder[nextIndex];
     if (focusFn) {
       focusFn();
-      // Scroll to center the focused element
-      await nextTick();
-      const activeElement = document.activeElement;
-      if (activeElement) {
-        activeElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
+      await scrollToActiveElement();
     }
   }
 };
@@ -284,12 +230,7 @@ const moveToPreviousField = async (currentIndex: number) => {
     const focusFn = focusOrder[prevIndex];
     if (focusFn) {
       focusFn();
-      // Scroll to center the focused element
-      await nextTick();
-      const activeElement = document.activeElement;
-      if (activeElement) {
-        activeElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
+      await scrollToActiveElement();
     }
   }
 };
@@ -332,13 +273,10 @@ const copyToClipboard = async () => {
   }
 };
 
-// Button focus state
 const clearButtonRef = ref<InstanceType<typeof VBtn> | null>(null);
-const isClearButtonFocused = ref(false);
 
 const focusClearButton = () => {
   clearButtonRef.value?.$el.focus();
-  isClearButtonFocused.value = true;
 };
 
 const handleClearButtonKeydown = (event: KeyboardEvent) => {
@@ -361,13 +299,8 @@ onMounted(async () => {
     <VRow justify="center">
       <VCol cols="12" md="10" lg="8" xl="6">
         <VCard variant="outlined" class="pa-6">
-          <div class="d-flex justify-end align-center mb-4" style="min-height: 40px;">
-            <VSwitch :model-value="isDark" :label="isDark ? 'Dark Mode' : 'Light Mode'" color="primary"
-              @update:model-value="(val: boolean) => toggleTheme(val)" />
-          </div>
           <VCardText>
             <div class="d-flex flex-column ga-6">
-              <!-- Date -->
               <div class="d-flex align-center ga-2">
                 <div class="flex-grow-1">
                   <DateField ref="dateFieldRef" v-model="formData.date" label="Date" :required="true"
@@ -378,71 +311,55 @@ onMounted(async () => {
                 </VBtn>
               </div>
 
-              <!-- Bathe -->
               <YesNoField ref="batheFieldRef" v-model="formData.bathe" label="Bathe" :required="true"
                 :on-next="() => moveToNextField(0)" :on-previous="() => moveToPreviousField(1)" />
 
-              <!-- Wake -->
               <TimeField ref="wakeFieldRef" v-model="formData.wake" label="Wake" :required="true"
                 :on-next="() => moveToNextField(1)" :on-previous="() => moveToPreviousField(2)" />
 
-              <!-- Sleep -->
               <TimeField ref="sleepFieldRef" v-model="formData.sleep" label="Sleep" :default-to-future="true"
                 :future-minutes="20" :required="true" :on-next="() => moveToNextField(2)"
                 :on-previous="() => moveToPreviousField(3)" />
 
-              <!-- Stress -->
               <FloatField ref="stressFieldRef" v-model="formData.stress" label="Stress" :max="10" :required="true"
                 :on-next="() => moveToNextField(3)" :on-previous="() => moveToPreviousField(4)" />
 
-              <!-- Tired -->
               <FloatField ref="tiredFieldRef" v-model="formData.tired" label="Tired" :max="10" :required="true"
                 :on-next="() => moveToNextField(4)" :on-previous="() => moveToPreviousField(5)" />
 
-              <!-- Game -->
               <AutocompleteField ref="gameFieldRef" v-model="formData.game" label="Game" :suggestions="gameSuggestions"
                 :required="false" :on-next="() => moveToNextField(5)" :on-previous="() => moveToPreviousField(6)" />
 
-              <!-- Music -->
               <AutocompleteField ref="musicFieldRef" v-model="formData.music" label="Music"
                 :suggestions="musicSuggestions" :required="true" :on-next="() => moveToNextField(6)"
                 :on-previous="() => moveToPreviousField(7)" />
 
-              <!-- Grateful -->
               <ListField ref="gratefulFieldRef" v-model="formData.grateful" label="Grateful" :required="true"
                 :on-next="() => moveToNextField(7)" :on-previous="() => moveToPreviousField(8)" />
 
-              <!-- Learn -->
               <ListField ref="learnFieldRef" v-model="formData.learn" label="Learn" :required="true"
                 :on-next="() => moveToNextField(8)" :on-previous="() => moveToPreviousField(9)" />
 
-              <!-- Exercise -->
               <AutocompleteField ref="exerciseFieldRef" v-model="formData.exercise" label="Exercise"
                 :suggestions="exerciseSuggestions" :required="true" :on-next="() => moveToNextField(9)"
                 :on-previous="() => moveToPreviousField(10)" />
 
-              <!-- Remember -->
               <FloatField ref="rememberFieldRef" v-model="formData.remember" label="Remember" :max="10" :required="true"
                 :on-next="() => moveToNextField(10)" :on-previous="() => moveToPreviousField(10)" />
 
-              <!-- Day rating -->
               <FloatField ref="dayRatingFieldRef" v-model="formData.dayRating" label="Day rating" :max="10"
                 :required="true" :on-next="() => moveToNextField(11)" :on-previous="() => moveToPreviousField(11)" />
 
-              <!-- Feeling -->
               <IntField ref="feelingFieldRef" v-model="formData.feeling" label="Feeling" :max="100" :required="true"
                 :on-next="() => moveToNextField(12)" :on-previous="() => moveToPreviousField(12)" />
 
-              <!-- Why -->
               <StringField ref="whyFieldRef" v-model="formData.why" label="Why" :required="true"
                 :on-next="() => moveToNextField(13)" :on-previous="() => moveToPreviousField(13)" />
 
-              <!-- Phase -->
               <AutocompleteListField ref="phaseFieldRef" v-model="formData.phase" label="Phase"
                 :suggestions="phaseSuggestions" :required="true" :auto-select="false"
                 :on-next="() => moveToNextField(14)" :on-previous="() => moveToPreviousField(15)" />
 
-              <!-- Happened -->
               <div class="d-flex align-center ga-2">
                 <div class="flex-grow-1">
                   <PatternTextField ref="happenedFieldRef" v-model="formData.happened" label="Happened" :required="true"
@@ -453,10 +370,8 @@ onMounted(async () => {
                 </VBtn>
               </div>
 
-              <!-- Time -->
               <TimeDisplay ref="timeDisplayRef" v-model="formData.time" />
 
-              <!-- Day name -->
               <StringField ref="dayNameFieldRef" v-model="formData.dayName" label="Day name" :required="false"
                 :on-next="focusClearButton" :on-previous="() => moveToPreviousField(17)" />
 
@@ -468,21 +383,13 @@ onMounted(async () => {
                   Missing or invalid fields:
                 </div>
                 <div class="d-flex flex-wrap ga-2">
-                  <VChip 
-                    v-for="error in validationErrors" 
-                    :key="error" 
-                    color="error" 
-                    variant="outlined" 
-                    size="small"
-                    style="cursor: pointer;"
-                    @click="focusFieldByError(error)"
-                  >
+                  <VChip v-for="error in validationErrors" :key="error" color="error" variant="outlined" size="small"
+                    style="cursor: pointer;" @click="focusFieldByError(error)">
                     {{ error }}
                   </VChip>
                 </div>
               </div>
 
-              <!-- Buttons -->
               <div class="d-flex justify-center flex-wrap ga-4">
                 <VBtn :color="copySuccess ? 'success' : 'primary'" size="large" class="text-h6"
                   @click="copyToClipboard">

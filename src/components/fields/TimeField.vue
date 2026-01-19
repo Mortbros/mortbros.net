@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { VTextField } from 'vuetify/components';
+import { focusInput } from '@/lib/fieldUtils';
 
 const props = defineProps<{
   modelValue: string;
@@ -24,28 +25,19 @@ const value = computed({
 });
 
 const focus = async () => {
-  await nextTick();
-  const input = inputRef.value?.$el.querySelector('input') as HTMLInputElement;
-  if (input) {
-    input.focus();
-    await nextTick();
-    input.select();
-  }
+  await focusInput(inputRef.value);
 };
 
 const formatTime = () => {
   if (!value.value) return;
-  // Ensure time is in HH:mm format
   const timeMatch = value.value.match(/(\d{1,2}):?(\d{2})?/);
   if (timeMatch) {
     let hours = parseInt(timeMatch[1] || '0', 10);
     let minutes = parseInt(timeMatch[2] || '0', 10);
-    
-    // Handle 12-hour to 24-hour conversion if needed (if hours > 12, assume it's already 24-hour)
-    // But we'll just ensure it's in 24-hour format
+
     if (hours > 23) hours = 23;
     if (minutes > 59) minutes = 59;
-    
+
     const formatted = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
     if (formatted !== value.value) {
       value.value = formatted;
@@ -79,20 +71,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <VTextField
-    ref="inputRef"
-    v-model="value"
-    :label="label"
-    type="text"
-    pattern="([01]?[0-9]|2[0-3]):[0-5][0-9]"
-    placeholder="HH:mm (24-hour)"
-    variant="outlined"
-    density="comfortable"
-    class="text-h6"
-    :rules="required ? [(v: string) => !!v || 'Required'] : []"
-    tabindex="-1"
-    hide-details
-    @keydown="handleKeydown"
-    @blur="formatTime"
-  />
+  <VTextField ref="inputRef" v-model="value" :label="label" type="text" pattern="([01]?[0-9]|2[0-3]):[0-5][0-9]"
+    placeholder="HH:mm (24-hour)" variant="outlined" density="comfortable" class="text-h6"
+    :rules="required ? [(v: string) => !!v || 'Required'] : []" tabindex="-1" hide-details @keydown="handleKeydown"
+    @blur="formatTime" />
 </template>

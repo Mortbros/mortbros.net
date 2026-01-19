@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed } from 'vue';
 import { VTextField } from 'vuetify/components';
+import { focusInput } from '@/lib/fieldUtils';
 
 const props = defineProps<{
   modelValue: number | string;
@@ -36,13 +37,7 @@ const stringValue = computed({
 });
 
 const focus = async () => {
-  await nextTick();
-  const input = inputRef.value?.$el.querySelector('input') as HTMLInputElement;
-  if (input) {
-    input.focus();
-    await nextTick();
-    input.select();
-  }
+  await focusInput(inputRef.value);
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
@@ -59,18 +54,8 @@ defineExpose({ focus });
 </script>
 
 <template>
-  <VTextField
-    ref="inputRef"
-    v-model="stringValue"
-    :label="label"
-    type="number"
-    :min="1"
-    :max="max"
-    variant="outlined"
-    density="comfortable"
-    class="text-h6"
-    :rules="required ? [(v: string) => (v !== '' && parseInt(v, 10) >= 1) || 'Must be at least 1'] : []"
-    hide-details
-    @keydown="handleKeydown"
-  />
+  <VTextField ref="inputRef" v-model="stringValue" :label="label" type="number" :min="1" :max="max" variant="outlined"
+    density="comfortable" class="text-h6"
+    :rules="required ? [(v: string) => (v !== '' && parseInt(v, 10) >= 1) || 'Must be at least 1'] : []" hide-details
+    @keydown="handleKeydown" />
 </template>

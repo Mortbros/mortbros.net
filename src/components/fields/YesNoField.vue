@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { VTextField } from 'vuetify/components';
+import { focusInput } from '@/lib/fieldUtils';
 
 const props = defineProps<{
   modelValue: string;
@@ -22,13 +23,7 @@ const value = computed({
 });
 
 const focus = async () => {
-  await nextTick();
-  const input = inputRef.value?.$el.querySelector('input') as HTMLInputElement;
-  if (input) {
-    input.focus();
-    await nextTick();
-    input.select();
-  }
+  await focusInput(inputRef.value);
 };
 
 defineExpose({ focus });
@@ -59,15 +54,6 @@ watch(() => props.modelValue, (newVal) => {
 </script>
 
 <template>
-  <VTextField
-    ref="inputRef"
-    v-model="value"
-    :label="label"
-    variant="outlined"
-    density="comfortable"
-    class="text-h6"
-    :rules="required ? [(v: string) => !!v || 'Required'] : []"
-    hide-details
-    @keydown="handleKeydown"
-  />
+  <VTextField ref="inputRef" v-model="value" :label="label" variant="outlined" density="comfortable" class="text-h6"
+    :rules="required ? [(v: string) => !!v || 'Required'] : []" hide-details @keydown="handleKeydown" />
 </template>

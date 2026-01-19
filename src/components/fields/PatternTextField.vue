@@ -28,11 +28,9 @@ const value = computed({
 const capitalizeSentences = (text: string): string => {
   if (!text) return text;
   let capitalized = text;
-  // Split by sentence endings (. ! ?) and capitalize first letter after
   capitalized = capitalized.replace(/([.!?]\s+)([a-z])/g, (match, p1, p2) => {
     return p1 + p2.toUpperCase();
   });
-  // Capitalize first letter of the entire string if it starts with lowercase
   if (capitalized.length > 0 && /^[a-z]/.test(capitalized)) {
     capitalized = capitalized.charAt(0).toUpperCase() + capitalized.slice(1);
   }
@@ -55,23 +53,16 @@ const capitalize = () => {
   }
 };
 
-const handleBlur = () => {
-  // Capitalization removed - user can capitalize manually or use button
-};
-
 defineExpose({ focus, capitalize });
 
 const handleTextareaKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey) {
-    // Enter: Go to next field (not new line)
     e.preventDefault();
     props.onNext?.();
   } else if (e.key === 'Enter' && e.shiftKey) {
-    // Shift+Enter: Go to previous field
     e.preventDefault();
     props.onPrevious?.();
   }
-  // Ctrl+Enter or just Enter with shift for new line is handled by default
 };
 
 const handleInput = async (event: any): Promise<void> => {
@@ -98,9 +89,8 @@ const handleInput = async (event: any): Promise<void> => {
       const key = rule.key.trim();
       if (!key) continue;
 
-      // Check for <p> or <p,> pattern (name slot)
       const hasNameSlot = key.includes('<p,>') || key.includes('<p>');
-      
+
       if (hasNameSlot) {
         const matchResult = matchPattern(lastWord, key, nameMappings.value);
         if (matchResult.matched) {
@@ -109,7 +99,7 @@ const handleInput = async (event: any): Promise<void> => {
           matchedKeyText = lastWord;
           break;
         }
-        continue; // Skip to next rule if name slot pattern didn't match
+        continue;
       }
 
       const isRegex = key.startsWith('/') && key.lastIndexOf('/') > 0;
@@ -144,32 +134,18 @@ const handleInput = async (event: any): Promise<void> => {
 
       let newValue = textBeforeTarget + replacementText + " " + textAfterCursor;
       const newCursorPos = textBeforeTarget.length + replacementText.length + 1;
-      
+
       value.value = newValue;
       await nextTick();
       textarea.setSelectionRange(newCursorPos, newCursorPos);
     }
   }
-  
-  // Auto-capitalization removed - user can capitalize manually or use button
+
 };
 </script>
 
 <template>
-  <VTextarea
-    ref="textareaRef"
-    v-model="value"
-    :label="label"
-    variant="outlined"
-    density="comfortable"
-    class="text-h6"
-    :rules="required ? [(v: string) => !!v || 'Required'] : []"
-    hide-details
-    auto-grow
-    rows="3"
-    spellcheck="true"
-    @input="handleInput"
-    @keydown="handleTextareaKeydown"
-    @blur="handleBlur"
-  />
+  <VTextarea ref="textareaRef" v-model="value" :label="label" variant="outlined" density="comfortable" class="text-h6"
+    :rules="required ? [(v: string) => !!v || 'Required'] : []" hide-details auto-grow rows="3" spellcheck="true"
+    @input="handleInput" @keydown="handleTextareaKeydown" />
 </template>

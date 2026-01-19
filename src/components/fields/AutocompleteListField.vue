@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue';
 import { VCombobox } from 'vuetify/components';
+import { focusInput } from '@/lib/fieldUtils';
 
 const props = defineProps<{
   modelValue: string[];
@@ -36,7 +37,6 @@ const focus = async () => {
 
 defineExpose({ focus });
 
-// Sync localItems with modelValue (only when changed externally)
 watch(() => props.modelValue, (newVal) => {
   if (!isInternalUpdate.value) {
     if (!newVal || newVal.length === 0) {
@@ -50,7 +50,6 @@ watch(() => props.modelValue, (newVal) => {
 
 const handleKeydown = async (event: KeyboardEvent, index: number) => {
   if (event.key === 'Enter' && event.ctrlKey) {
-    // Ctrl+Enter: Add new field
     event.preventDefault();
     const currentValue = localItems.value[index]?.trim() || '';
     const itemsToSave = localItems.value.slice(0, -1).filter(item => item.trim() !== '');
@@ -59,30 +58,23 @@ const handleKeydown = async (event: KeyboardEvent, index: number) => {
     }
     isInternalUpdate.value = true;
     emit('update:modelValue', itemsToSave);
-    
-    // Add new empty field
+
     localItems.value = [...itemsToSave, ''];
     await nextTick();
-    // Focus the new field
     const newIndex = itemsToSave.length;
     if (inputRefs.value[newIndex]) {
-      const input = inputRefs.value[newIndex].$el.querySelector('input') as HTMLInputElement;
-      if (input) {
-        input.focus();
-      }
+      await focusInput(inputRefs.value[newIndex], 'input', false);
     }
   } else if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey) {
-    // Enter: Move to next field
     event.preventDefault();
-    
+
     if (index < localItems.value.length - 1) {
-      // Move to next field in list
       await nextTick();
-      if (inputRefs.value[index + 1]) {
-        inputRefs.value[index + 1].$el.querySelector('input')?.focus();
+      const nextRef = inputRefs.value[index + 1];
+      if (nextRef?.$el) {
+        nextRef.$el.querySelector('input')?.focus();
       }
     } else {
-      // Last field, move to next section
       const itemsToSave = localItems.value.slice(0, -1).filter(item => item.trim() !== '');
       isInternalUpdate.value = true;
       emit('update:modelValue', itemsToSave);
@@ -113,26 +105,11 @@ const updateItem = (index: number, value: string) => {
 
 <template>
   <div class="list-field">
-    <div
-      v-for="(item, index) in localItems"
-      :key="index"
-      class="mb-2"
-    >
-      <VCombobox
-        :ref="(el) => { if (el) inputRefs[index] = el as InstanceType<typeof VCombobox> }"
-        :model-value="localItems[index]"
-        :label="index === 0 ? label : ''"
-        :items="suggestions"
-        variant="outlined"
-        density="comfortable"
-        class="text-h6"
-        hide-details
-        spellcheck="true"
-        autocomplete="off"
-        clearable
-        @update:model-value="updateItem(index, $event)"
-        @keydown="handleKeydown($event, index)"
-      />
+    <div v-for="(item, index) in localItems" :key="index" class="mb-2">
+      <VCombobox :ref="(el) => { if (el) inputRefs[index] = el as InstanceType<typeof VCombobox> }"
+        :model-value="localItems[index]" :label="index === 0 ? label : ''" :items="suggestions" variant="outlined"
+        density="comfortable" class="text-h6" hide-details spellcheck="true" autocomplete="off" clearable
+        @update:model-value="updateItem(index, $event)" @keydown="handleKeydown($event, index)" />
     </div>
   </div>
 </template>

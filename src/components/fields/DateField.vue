@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { VTextField } from 'vuetify/components';
+import { focusInput, getTodayDate } from '@/lib/fieldUtils';
 
 const props = defineProps<{
   modelValue: string;
@@ -21,11 +22,7 @@ const value = computed({
 });
 
 const focus = () => {
-  const input = inputRef.value?.$el.querySelector('input');
-  if (input) {
-    input.focus();
-    input.select();
-  }
+  focusInput(inputRef.value);
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
@@ -39,26 +36,12 @@ defineExpose({ focus });
 
 onMounted(() => {
   if (!props.modelValue) {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const day = String(today.getDate()).padStart(2, '0');
-    emit('update:modelValue', `${year}-${month}-${day}`);
+    emit('update:modelValue', getTodayDate());
   }
 });
 </script>
 
 <template>
-  <VTextField
-    ref="inputRef"
-    v-model="value"
-    :label="label"
-    type="date"
-    variant="outlined"
-    density="comfortable"
-    class="text-h6"
-    :rules="required ? [(v: string) => !!v || 'Required'] : []"
-    hide-details
-    @keydown="handleKeydown"
-  />
+  <VTextField ref="inputRef" v-model="value" :label="label" type="date" variant="outlined" density="comfortable"
+    class="text-h6" :rules="required ? [(v: string) => !!v || 'Required'] : []" hide-details @keydown="handleKeydown" />
 </template>

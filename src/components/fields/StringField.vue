@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed } from 'vue';
 import { VTextField } from 'vuetify/components';
+import { focusInput } from '@/lib/fieldUtils';
 
 const props = defineProps<{
   modelValue: string;
@@ -28,18 +29,8 @@ const capitalize = () => {
   }
 };
 
-const handleBlur = () => {
-  // Capitalization removed - user can capitalize manually or use button
-};
-
 const focus = async () => {
-  await nextTick();
-  const input = inputRef.value?.$el.querySelector('input') as HTMLInputElement;
-  if (input) {
-    input.focus();
-    await nextTick();
-    input.select();
-  }
+  await focusInput(inputRef.value);
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
@@ -56,16 +47,7 @@ defineExpose({ focus, capitalize });
 </script>
 
 <template>
-  <VTextField
-    ref="inputRef"
-    v-model="value"
-    :label="label"
-    variant="outlined"
-    density="comfortable"
-    class="text-h6"
-    :rules="required ? [(v: string) => !!v || 'Required'] : []"
-    hide-details
-    spellcheck="true"
-    @keydown="handleKeydown"
-  />
+  <VTextField ref="inputRef" v-model="value" :label="label" variant="outlined" density="comfortable" class="text-h6"
+    :rules="required ? [(v: string) => !!v || 'Required'] : []" hide-details spellcheck="true"
+    @keydown="handleKeydown" />
 </template>

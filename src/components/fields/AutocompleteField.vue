@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed } from 'vue';
 import { VCombobox } from 'vuetify/components';
+import { focusInput } from '@/lib/fieldUtils';
 
 const props = defineProps<{
   modelValue: string;
@@ -23,13 +24,7 @@ const value = computed({
 });
 
 const focus = async () => {
-  await nextTick();
-  const input = inputRef.value?.$el.querySelector('input') as HTMLInputElement;
-  if (input) {
-    input.focus();
-    await nextTick();
-    input.select();
-  }
+  await focusInput(inputRef.value);
 };
 
 const capitalize = () => {
@@ -41,7 +36,6 @@ const capitalize = () => {
 
 const handleKeydown = (event: KeyboardEvent) => {
   if (event.key === 'Enter' && event.ctrlKey) {
-    // Ctrl+Enter: Allow default behavior (submit/select)
     return;
   } else if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
@@ -53,35 +47,15 @@ const handleKeydown = (event: KeyboardEvent) => {
 };
 
 const handleValueUpdate = (newValue: string) => {
-  // Don't capitalize immediately - let autocomplete work first
   value.value = newValue || '';
-};
-
-// Capitalization removed - user can capitalize manually or use button
-const handleBlur = () => {
-  // No auto-capitalization
 };
 
 defineExpose({ focus, capitalize });
 </script>
 
 <template>
-  <VCombobox
-    ref="inputRef"
-    v-model="value"
-    :label="label"
-    :items="suggestions"
-    variant="outlined"
-    density="comfortable"
-    class="text-h6"
-    :rules="required ? [(v: string) => !!v || 'Required'] : []"
-    hide-details
-    spellcheck="true"
-    autocomplete="off"
-    :menu-props="{ closeOnContentClick: false }"
-    clearable
-    :return-object="false"
-    @keydown="handleKeydown"
-    @update:model-value="handleValueUpdate"
-  />
+  <VCombobox ref="inputRef" v-model="value" :label="label" :items="suggestions" variant="outlined" density="comfortable"
+    class="text-h6" :rules="required ? [(v: string) => !!v || 'Required'] : []" hide-details spellcheck="true"
+    autocomplete="off" :menu-props="{ closeOnContentClick: false }" clearable :return-object="false"
+    @keydown="handleKeydown" @update:model-value="handleValueUpdate" />
 </template>
