@@ -369,7 +369,13 @@ const acceptSuggestion = async (suggestion: Suggestion) => {
   const prefix = before.slice(0, lastSpace + 1);
   const after = val.slice(cursor);
 
-  value.value = prefix + suggestion.expansion + ' ' + after;
+  // Auto-capitalize if at the start of a sentence (same rule as space-press expansion)
+  const context = prefix.trimEnd();
+  const display = (!context || /[.!?]$/.test(context))
+    ? suggestion.expansion.charAt(0).toUpperCase() + suggestion.expansion.slice(1)
+    : suggestion.expansion;
+
+  value.value = prefix + display + ' ' + after;
 
   emit('usage-recorded', {
     rawInput: suggestion.rawInput,
@@ -378,9 +384,15 @@ const acceptSuggestion = async (suggestion: Suggestion) => {
   });
 
   clearDropdown();
-  const newCursor = prefix.length + suggestion.expansion.length + 1;
+  const newCursor = prefix.length + display.length + 1;
   await nextTick();
-  textarea.setSelectionRange(newCursor, newCursor);
+  // Re-query: the value update may have re-rendered/replaced the textarea node,
+  // making the captured reference stale
+  const ta = getTextarea();
+  if (ta) {
+    ta.focus();
+    ta.setSelectionRange(newCursor, newCursor);
+  }
 };
 
 // ── Input handler ─────────────────────────────────────────────────────────────
@@ -456,6 +468,16 @@ const handleKeydown = async (e: KeyboardEvent) => {
   if (suggestions.value.length > 0) {
     if (e.key === 'ArrowDown') { e.preventDefault(); selectedIndex.value = Math.min(selectedIndex.value + 1, suggestions.value.length - 1); return; }
     if (e.key === 'ArrowUp')   { e.preventDefault(); selectedIndex.value = Math.max(selectedIndex.value - 1, -1); return; }
+    // Space accepts an explicitly highlighted suggestion (otherwise falls through
+    // to the default space-press expansion in handleInput)
+    if (e.key === ' ' && selectedIndex.value >= 0) {
+      const target = suggestions.value[selectedIndex.value];
+      if (target && isAcceptable(target)) {
+        e.preventDefault();
+        await acceptSuggestion(target);
+        return;
+      }
+    }
     if ((e.key === 'Tab' && !e.shiftKey) || e.key === 'Enter') {
       // Find first acceptable suggestion (skip hints)
       const idx = selectedIndex.value >= 0 ? selectedIndex.value : 0;
@@ -508,8 +530,8 @@ defineExpose({ focus, capitalize });
       v-model="value"
       :label="label"
       variant="outlined"
-      density="comfortable"
-      class="text-h6"
+     
+     
       :class="{ 'manual-mode': !shortcutMode }"
       :rules="required ? [(v: string) => !!v || 'Required'] : []"
       hide-details

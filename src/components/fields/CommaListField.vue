@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
-import { VTextField, VMenu, VList, VListItem, VListItemTitle } from 'vuetify/components'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { VCombobox } from 'vuetify/components'
 
 const props = defineProps<{
   modelValue: string[]
@@ -10,208 +10,195 @@ const props = defineProps<{
   onPrevious?: () => void
   required?: boolean
   autoSelect?: boolean
+  emptyValue?: string
 }>()
 
 const emit = defineEmits<{
   'update:modelValue': [value: string[]]
 }>()
 
-const fieldRef = ref<InstanceType<typeof VTextField> | null>(null)
-const menuOpen = ref(false)
-const highlightIndex = ref(-1)
+const comboboxRef = ref<InstanceType<typeof VCombobox> | null>(null)
 const isInternalUpdate = ref(false)
-const rawText = ref('')
+const localValue = ref<string[]>([])
+const searchText = ref('')
+const isFocused = ref(false)
+
+// Show the emptyValue (e.g. "N") as a placeholder only while unfocused and empty
+const displayPlaceholder = computed(() =>
+  !isFocused.value && localValue.value.length === 0 ? props.emptyValue : undefined
+)
 
 const getNativeInput = (): HTMLInputElement | null =>
-  fieldRef.value?.$el?.querySelector('input') ?? null
+  comboboxRef.value?.$el?.querySelector('input') ?? null
 
-// Sync from parent → display text
 watch(() => props.modelValue, (val) => {
   if (!isInternalUpdate.value) {
-    rawText.value = val?.filter(Boolean).join(', ') ?? ''
+    localValue.value = val?.filter(Boolean) ?? []
   }
   isInternalUpdate.value = false
 }, { immediate: true })
 
 const focus = async () => {
   await nextTick()
-  const input = getNativeInput()
-  if (!input) return
-  input.focus()
-  if (props.autoSelect !== false) {
-    await nextTick()
-    input.select()
-  }
+  getNativeInput()?.focus()
 }
 defineExpose({ focus })
 
-function getTokens(): string[] {
-  return rawText.value.split(',').map(t => t.trim()).filter(Boolean)
-}
-
-function save() {
+function save(val: string[]) {
   isInternalUpdate.value = true
-  emit('update:modelValue', getTokens())
+  emit('update:modelValue', val.filter(Boolean))
 }
 
-// The token the user is currently typing = last comma-segment
-const currentToken = computed(() => {
-  const parts = rawText.value.split(',')
-  return parts[parts.length - 1].trim()
-})
-
-// Already-accepted tokens (all but the last)
-const committedTokens = computed(() =>
-  rawText.value.split(',').slice(0, -1).map(t => t.trim().toLowerCase())
-)
+// Handles VCombobox committing a selection itself (mouse click on a menu item,
+// or arrow-key navigation + Enter — arrow keys move real focus into the menu
+// list, so our capture-phase input listener never sees that Enter).
+function handleUpdate(val: unknown) {
+  if (!Array.isArray(val)) return
+  localValue.value = (val as string[]).filter(Boolean)
+  save(localValue.value)
+  // Refocus the input: after a menu selection focus is left on the list item
+  clearInput()
+  nextTick(() => getNativeInput()?.focus())
+}
 
 const filteredSuggestions = computed(() => {
   if (!props.suggestions?.length) return []
-  const token = currentToken.value.toLowerCase()
-  return props.suggestions
-    .filter(s => s.toLowerCase().startsWith(token) && !committedTokens.value.includes(s.toLowerCase()))
-    .slice(0, 8)
+  const q = searchText.value.toLowerCase()
+  if (!q) return props.suggestions
+  return props.suggestions.filter(s => s.toLowerCase().startsWith(q))
 })
 
-// Auto-show/hide dropdown as suggestions change
-watch(filteredSuggestions, (suggs) => {
-  if (suggs.length > 0) {
-    menuOpen.value = true
-    highlightIndex.value = -1
-  } else {
-    menuOpen.value = false
-  }
-})
-
-function acceptSuggestion(s: string) {
-  const parts = rawText.value.split(',')
-  parts[parts.length - 1] = parts.length > 1 ? ` ${s}` : s
-  rawText.value = parts.join(',')
-  save()
-  menuOpen.value = false
+function clearInput() {
+  searchText.value = ''
   nextTick(() => {
     const input = getNativeInput()
-    if (!input) return
-    input.focus()
-    input.setSelectionRange(rawText.value.length, rawText.value.length)
+    if (input) {
+      input.value = ''
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    }
   })
 }
 
-function handleTextUpdate(val: string) {
-  rawText.value = val
-  save()
+function addChip(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed || localValue.value.includes(trimmed)) {
+    clearInput()
+    return
+  }
+  const newVal = [...localValue.value, trimmed]
+  localValue.value = newVal
+  save(newVal)
+  clearInput()
+  nextTick(() => getNativeInput()?.focus())
 }
 
-function handleKeydown(e: KeyboardEvent) {
-  if (menuOpen.value && filteredSuggestions.value.length > 0) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      highlightIndex.value = Math.min(highlightIndex.value + 1, filteredSuggestions.value.length - 1)
-      return
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      highlightIndex.value = Math.max(highlightIndex.value - 1, 0)
-      return
-    }
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      menuOpen.value = false
-      return
-    }
-    if (e.key === 'Enter' && highlightIndex.value >= 0) {
-      e.preventDefault()
-      acceptSuggestion(filteredSuggestions.value[highlightIndex.value])
-      return
-    }
-  }
-
+// Capture-phase listener on the native <input> — runs BEFORE VCombobox's handlers.
+// This prevents VCombobox from adding typed text as a chip when Enter is pressed;
+// we control all chip addition manually.
+function nativeKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter') {
+    e.stopPropagation()
     e.preventDefault()
-    save()
-    props.onNext?.()
+    if (!searchText.value) {
+      props.onNext?.()
+      return
+    }
+    // Pick the top filtered suggestion, or commit typed text as a free-text chip
+    if (filteredSuggestions.value.length > 0) {
+      addChip(filteredSuggestions.value[0])
+    } else {
+      addChip(searchText.value.trim().replace(/,$/, ''))
+    }
     return
   }
 
-  if (e.key === 'Tab') {
+  // Comma+Space: commit typed text as a free-text chip
+  if (e.key === ' ' && searchText.value.endsWith(',')) {
+    e.stopPropagation()
     e.preventDefault()
-    menuOpen.value = false
-    save()
+    const val = searchText.value.slice(0, -1).trim()
+    if (val) addChip(val)
+    else clearInput()
+    return
+  }
+
+  // Single backspace removes last chip when the text input is empty
+  if (e.key === 'Backspace' && !searchText.value) {
+    e.stopPropagation()
+    e.preventDefault()
+    if (localValue.value.length > 0) {
+      const newVal = localValue.value.slice(0, -1)
+      localValue.value = newVal
+      save(newVal)
+    }
+    return
+  }
+
+  // Tab: commit current text (pick top suggestion), then advance
+  if (e.key === 'Tab') {
+    e.stopPropagation()
+    e.preventDefault()
+    const val = searchText.value.trim().replace(/,$/, '')
+    if (val) {
+      if (filteredSuggestions.value.length > 0) addChip(filteredSuggestions.value[0])
+      else addChip(val)
+    }
     if (e.shiftKey) props.onPrevious?.()
     else props.onNext?.()
+    return
   }
+  // All other keys (ArrowDown, ArrowUp, Escape, etc.) propagate to VCombobox normally
 }
 
-// Click inside the field: select the whole comma-segment the cursor lands in
-function handleClick() {
-  nextTick(() => {
-    const input = getNativeInput()
-    if (!input) return
-    const cursor = input.selectionStart ?? 0
-    let pos = 0
-    const parts = rawText.value.split(',')
-    for (let i = 0; i < parts.length; i++) {
-      const segEnd = pos + parts[i].length
-      if (cursor >= pos && cursor <= segEnd) {
-        const leadingSpaces = parts[i].match(/^\s*/)?.[0].length ?? 0
-        input.setSelectionRange(pos + leadingSpaces, segEnd)
-        break
-      }
-      pos += parts[i].length + 1 // +1 for comma
-    }
-  })
-}
+onMounted(async () => {
+  await nextTick()
+  getNativeInput()?.addEventListener('keydown', nativeKeydown, { capture: true })
+})
 
-function handleFocus() {
-  if (filteredSuggestions.value.length > 0) menuOpen.value = true
-}
-
-function handleBlur() {
-  // Delay to allow suggestion mousedown to fire before menu closes
-  setTimeout(() => {
-    menuOpen.value = false
-    save()
-  }, 150)
-}
+onUnmounted(() => {
+  getNativeInput()?.removeEventListener('keydown', nativeKeydown, { capture: true })
+})
 </script>
 
 <template>
-  <div>
-    <VTextField
-      ref="fieldRef"
-      :model-value="rawText"
-      :label="label"
-      variant="outlined"
-      density="comfortable"
-      class="text-h6"
-      hide-details
-      spellcheck="true"
-      autocomplete="off"
-      @update:model-value="handleTextUpdate"
-      @keydown="handleKeydown"
-      @click="handleClick"
-      @focus="handleFocus"
-      @blur="handleBlur"
-    />
-    <VMenu
-      v-model="menuOpen"
-      activator="parent"
-      :close-on-content-click="false"
-      :close-on-back="false"
-      location="bottom start"
-      :offset="2"
-      content-class="elevation-4"
-    >
-      <VList density="compact" style="min-width: 180px; max-width: 420px">
-        <VListItem
-          v-for="(s, i) in filteredSuggestions"
-          :key="s"
-          :active="i === highlightIndex"
-          @mousedown.prevent="acceptSuggestion(s)"
-        >
-          <VListItemTitle>{{ s }}</VListItemTitle>
-        </VListItem>
-      </VList>
-    </VMenu>
-  </div>
+  <VCombobox
+    ref="comboboxRef"
+    v-model="localValue"
+    v-model:search="searchText"
+    :label="label"
+    :items="suggestions ?? []"
+    multiple
+    chips
+    closable-chips
+    variant="outlined"
+    hide-details
+    autocomplete="off"
+    class="comma-list-field"
+    :placeholder="displayPlaceholder"
+    persistent-placeholder
+    @update:model-value="handleUpdate"
+    @focus="isFocused = true"
+    @blur="isFocused = false"
+  />
 </template>
+
+<style scoped>
+/* Reduce internal top/bottom padding so the chip combobox matches other compact fields */
+.comma-list-field :deep(.v-field__input) {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  padding-left: 16px;
+  min-height: unset;
+  gap: 4px;
+}
+
+/* Chips: same visual weight as normal body text */
+.comma-list-field :deep(.v-chip) {
+  font-size: 1rem;
+  height: 28px;
+  padding: 0 10px;
+}
+.comma-list-field :deep(.v-chip .v-chip__close) {
+  font-size: 18px;
+}
+</style>
