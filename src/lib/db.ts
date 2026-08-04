@@ -46,6 +46,26 @@ async function exec(sql: string, params?: unknown[]): Promise<void> {
   if (!res.ok) throw new Error(await res.text())
 }
 
+export interface BatchStatement { sql: string; params?: unknown[] }
+
+/**
+ * Runs many statements in ONE round-trip and ONE transaction.
+ * Individual failures (e.g. duplicate keys) are skipped and reported rather
+ * than aborting the batch. Use for bulk writes instead of awaiting exec in a loop.
+ */
+export async function execBatch(
+  statements: BatchStatement[]
+): Promise<{ applied: number; failed: { index: number; error: string }[] }> {
+  if (statements.length === 0) return { applied: 0, failed: [] }
+  const res = await fetch('/api/db/batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ statements }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 /** Map sql.js result rows to typed objects. */
 function toObjects<T>(results: SqlJsResult): T[] {
   if (!results.length) return []
@@ -97,18 +117,8 @@ export async function setMappingInstanceEnabled(id: number, enabled: boolean): P
   await exec('UPDATE mapping_instance SET enabled = ? WHERE id = ?', [enabled ? 1 : 0, id])
 }
 
-// INSERT OR IGNORE variants used for CSV import (silently skip duplicates)
-export async function importMappingInstance(name: string, expansion: string): Promise<void> {
-  await exec('INSERT OR IGNORE INTO mapping_instance (name, expansion) VALUES (?, ?)', [name, expansion])
-}
-
-export async function importListValue(value: string, typeId: string, abbreviation?: string): Promise<void> {
-  await exec('INSERT OR IGNORE INTO list_values (value, type_id, abbreviation) VALUES (?, ?, ?)', [value, typeId, abbreviation ?? null])
-}
-
-export async function importMappingType(id: string, name: string): Promise<void> {
-  await exec('INSERT OR IGNORE INTO mapping_type (id, name) VALUES (?, ?)', [id, name])
-}
+// CSV imports build INSERT OR IGNORE statements inline and send them via
+// execBatch — see runImport in settings.vue.
 
 // ── List values ──────────────────────────────────────────────────────────────
 
@@ -361,12 +371,13 @@ export async function deleteSchemaVersion(id: number): Promise<void> {
 }
 
 export async function replaceSchemaFields(versionId: number, fields: Omit<FormSchemaField, 'id' | 'version_id'>[]): Promise<void> {
-  await exec('DELETE FROM form_schema_field WHERE version_id = ?', [versionId])
-  for (const f of fields) {
-    await exec(
-      'INSERT INTO form_schema_field (version_id, field_key, label, field_type, config, row_group, sort_order) VALUES (?,?,?,?,?,?,?)',
-      [versionId, f.field_key, f.label, f.field_type, f.config ? JSON.stringify(f.config) : null, f.row_group, f.sort_order]
-    )
-  }
+  // Single transaction: the delete and all inserts land together or not at all
+  await execBatch([
+    { sql: 'DELETE FROM form_schema_field WHERE version_id = ?', params: [versionId] },
+    ...fields.map(f => ({
+      sql: 'INSERT INTO form_schema_field (version_id, field_key, label, field_type, config, row_group, sort_order) VALUES (?,?,?,?,?,?,?)',
+      params: [versionId, f.field_key, f.label, f.field_type, f.config ? JSON.stringify(f.config) : null, f.row_group, f.sort_order],
+    })),
+  ])
 }
 

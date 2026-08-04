@@ -412,6 +412,10 @@ const onAppCopy = () => copyToClipboard()
 onMounted(() => document.addEventListener('app:copy', onAppCopy))
 onUnmounted(() => document.removeEventListener('app:copy', onAppCopy))
 
+// `window` is not in template scope — these mirror the Ctrl+Y / Ctrl+G shortcuts
+const openYouTube = () => window.open('https://www.youtube.com/feed/history', '_blank')
+const openMyActivity = () => window.open('https://myactivity.google.com/myactivity?pli=1', '_blank')
+
 // ── Mount ─────────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
@@ -443,9 +447,9 @@ onMounted(async () => {
                   </VBtn>
                 </div>
                 <VBtn icon="mdi-youtube" variant="text" size="small" title="YouTube history (Ctrl+Y)"
-                  @click="window.open('https://www.youtube.com/feed/history', '_blank')" />
+                  @click="openYouTube" />
                 <VBtn icon="mdi-google" variant="text" size="small" title="My Activity (Ctrl+G)"
-                  @click="window.open('https://myactivity.google.com/myactivity?pli=1', '_blank')" />
+                  @click="openMyActivity" />
                 <VBtn icon="mdi-cog" variant="text" size="small" @click="router.push('/settings')" />
               </div>
 

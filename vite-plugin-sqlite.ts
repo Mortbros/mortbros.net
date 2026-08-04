@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'fs'
+import { rename, writeFile } from 'fs/promises'
 import type { IncomingMessage, ServerResponse } from 'http'
 import type { Plugin } from 'vite'
 
@@ -92,20 +93,49 @@ export function sqlitePlugin(dbPath: string): Plugin {
   let db: import('sql.js').Database | null = null
   let flushTimer: ReturnType<typeof setTimeout> | null = null
 
-  function writeDb() {
+  let writing = false
+  let writeAgain = false
+
+  /** Synchronous full write — only for process-exit handlers, where async can't finish. */
+  function writeDbSync() {
     if (!db) return
     writeFileSync(dbPath, Buffer.from(db.export()))
+  }
+
+  /**
+   * Async full write. db.export() is unavoidable (sql.js has no incremental
+   * persistence), but writing off the event loop keeps API requests responsive
+   * — important on slow/synced storage like OneDrive.
+   *
+   * Writes to a temp file then renames, so a crash mid-write can't corrupt the
+   * DB. Overlapping calls coalesce into one trailing write.
+   */
+  async function writeDbAsync(): Promise<void> {
+    if (!db) return
+    if (writing) { writeAgain = true; return }
+    writing = true
+    try {
+      const buf = Buffer.from(db.export())
+      const tmp = `${dbPath}.tmp`
+      await writeFile(tmp, buf)
+      await rename(tmp, dbPath)
+    } catch (e) {
+      console.error('[sqlite] write failed:', e)
+    } finally {
+      writing = false
+      if (writeAgain) { writeAgain = false; void writeDbAsync() }
+    }
   }
 
   // Batches rapid writes into a single disk write after a short idle period.
   function scheduleFlush() {
     if (flushTimer) clearTimeout(flushTimer)
-    flushTimer = setTimeout(() => { flushTimer = null; writeDb() }, 500)
+    flushTimer = setTimeout(() => { flushTimer = null; void writeDbAsync() }, 500)
   }
 
   function flushImmediate() {
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null }
-    writeDb()
+    writeDbSync()
   }
 
   async function init() {
@@ -233,7 +263,7 @@ export function sqlitePlugin(dbPath: string): Plugin {
       // columns already dropped — nothing to do
     }
 
-    writeDb()
+    writeDbSync()
     console.log(`[sqlite] using ${dbPath}`)
   }
 
@@ -271,6 +301,30 @@ export function sqlitePlugin(dbPath: string): Plugin {
             // Rapid writes (e.g. token_usage inserts) share one disk write.
             scheduleFlush()
             json(res, { ok: true })
+          } else if (route === '/batch') {
+            // Many statements in ONE round-trip and ONE transaction — bulk
+            // imports were previously one HTTP request per row.
+            const stmts = (body as unknown as { statements?: { sql: string; params?: unknown[] }[] }).statements ?? []
+            let applied = 0
+            const failed: { index: number; error: string }[] = []
+            db.run('BEGIN')
+            try {
+              for (let i = 0; i < stmts.length; i++) {
+                try {
+                  db.run(stmts[i].sql, stmts[i].params as any)
+                  applied++
+                } catch (e: any) {
+                  // Skip bad rows (e.g. duplicates) without losing the batch
+                  failed.push({ index: i, error: e.message })
+                }
+              }
+              db.run('COMMIT')
+            } catch (e) {
+              db.run('ROLLBACK')
+              throw e
+            }
+            scheduleFlush()
+            json(res, { ok: true, applied, failed })
           } else {
             next()
           }

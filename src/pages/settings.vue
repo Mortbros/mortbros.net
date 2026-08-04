@@ -8,7 +8,7 @@ import {
 } from 'vuetify/components';
 import {
   getMappingInstances, insertMappingInstance, updateMappingInstance, deleteMappingInstance,
-  setMappingInstanceEnabled, importMappingInstance, importListValue, importMappingType,
+  setMappingInstanceEnabled, execBatch,
   getListValues, insertListValue, updateListValue, deleteListValue, setListValueEnabled,
   getMappingTypes, insertMappingType, updateMappingType, deleteMappingType,
   countMappingsUsingType, renameMappingTypeId,
@@ -16,7 +16,7 @@ import {
   getFormHistoryHappenedTexts, getAllAppSettings, setAppSetting,
   getFormSchemaVersions, getSchemaFields, upsertSchemaVersion, deleteSchemaVersion, replaceSchemaFields,
 } from '@/lib/db';
-import type { MappingInstance, ListValue, MappingType, FormHistoryRow, FormSchemaVersion, FormSchemaField } from '@/lib/db';
+import type { MappingInstance, ListValue, MappingType, FormHistoryRow, FormSchemaVersion, FormSchemaField, BatchStatement } from '@/lib/db';
 import { parseYaml, schemaToYaml, yamlFieldsToDb } from '@/lib/formSchema';
 import { findAllMatches, expandToken } from '@/lib/patternMatcher';
 
@@ -31,6 +31,15 @@ type TableHeader = {
 }
 
 const router = useRouter();
+
+// Paginate the tables that grow unbounded (mappings, list values, history).
+// Rendering every row is the main cost on mobile.
+const ROWS_PER_PAGE = [
+  { value: 25, title: '25' },
+  { value: 50, title: '50' },
+  { value: 100, title: '100' },
+  { value: -1, title: 'All' },
+];
 
 const tab = ref('mappings');
 const snackbar = ref(false);
@@ -139,9 +148,18 @@ const deleteMapping = async (id: number) => {
   notify('Deleted');
 };
 
+// Update the single row locally instead of refetching every table — a full
+// refresh re-reads ~1300 rows and re-renders all tables for one checkbox.
 const toggleMapping = async (id: number, enabled: boolean) => {
-  await setMappingInstanceEnabled(id, enabled);
-  await refresh();
+  const row = mappings.value.find(m => m.id === id);
+  if (row) row.enabled = enabled;
+  try {
+    await setMappingInstanceEnabled(id, enabled);
+  } catch (e) {
+    if (row) row.enabled = !enabled; // revert on failure
+    notify('Failed to update');
+    throw e;
+  }
 };
 
 const mappingHeaders: TableHeader[] = [
@@ -288,8 +306,15 @@ const deleteListVal = async (id: number) => {
 };
 
 const toggleListValue = async (id: number, enabled: boolean) => {
-  await setListValueEnabled(id, enabled);
-  await refresh();
+  const row = listValues.value.find(v => v.id === id);
+  if (row) row.enabled = enabled;
+  try {
+    await setListValueEnabled(id, enabled);
+  } catch (e) {
+    if (row) row.enabled = !enabled; // revert on failure
+    notify('Failed to update');
+    throw e;
+  }
 };
 
 // Columns shown depend on whether the active type uses abbreviations
@@ -411,18 +436,16 @@ const runHistoryImport = async () => {
   historyImportLoading.value = true
   const text = await f.text()
   const rows = parseDelimitedFile(text).filter(r => r.date)
-  let imported = 0
-  for (const row of rows) {
-    const output = Object.values(row).join('\t')
-    await upsertFormHistory({
-      date: row.date,
-      output,
-      saved_at: new Date().toISOString(),
-      responses: JSON.stringify(row),
-      schema_version_id: null,
-    })
-    imported++
-  }
+  const savedAt = new Date().toISOString()
+  // One batched transaction rather than a round-trip per row
+  const { applied: imported } = await execBatch(rows.map(row => ({
+    sql: `INSERT INTO form_history (date, output, saved_at, responses, schema_version_id)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(date) DO UPDATE SET
+            output=excluded.output, saved_at=excluded.saved_at,
+            responses=excluded.responses, schema_version_id=excluded.schema_version_id`,
+    params: [row.date, Object.values(row).join('\t'), savedAt, JSON.stringify(row), null],
+  })))
   historyImportLoading.value = false
   historyImportDialog.value = false
   historyImportFile.value = null
@@ -538,21 +561,24 @@ const openImport = (target: ImportTarget) => {
 
 const runImport = async () => {
   importLoading.value = true;
-  let imported = 0, skipped = 0;
+  let skipped = 0;
+  // Build all statements up front, then send as ONE batched transaction
+  const statements: BatchStatement[] = [];
   for (const row of importParsedRows.value) {
-    try {
-      if (importTarget.value === 'mappings') {
-        if (!row.name || !row.expansion) { skipped++; continue; }
-        await importMappingInstance(row.name, row.expansion); imported++;
-      } else if (importTarget.value === 'listValues') {
-        if (!row.value || !row.type_id) { skipped++; continue; }
-        await importListValue(row.value, row.type_id, row.abbreviation || undefined); imported++;
-      } else {
-        if (!row.id || !row.name) { skipped++; continue; }
-        await importMappingType(row.id, row.name); imported++;
-      }
-    } catch { skipped++; }
+    if (importTarget.value === 'mappings') {
+      if (!row.name || !row.expansion) { skipped++; continue; }
+      statements.push({ sql: 'INSERT OR IGNORE INTO mapping_instance (name, expansion) VALUES (?, ?)', params: [row.name, row.expansion] });
+    } else if (importTarget.value === 'listValues') {
+      if (!row.value || !row.type_id) { skipped++; continue; }
+      statements.push({ sql: 'INSERT OR IGNORE INTO list_values (value, type_id, abbreviation) VALUES (?, ?, ?)', params: [row.value, row.type_id, row.abbreviation || null] });
+    } else {
+      if (!row.id || !row.name) { skipped++; continue; }
+      statements.push({ sql: 'INSERT OR IGNORE INTO mapping_type (id, name) VALUES (?, ?)', params: [row.id, row.name] });
+    }
   }
+  const { applied, failed } = await execBatch(statements);
+  const imported = applied;
+  skipped += failed.length;
   importLoading.value = false;
   importDialog.value = false;
   await refresh();
@@ -890,7 +916,8 @@ const deleteSchemaVersionConfirm = async (id: number) => {
                   style="max-width: 320px" />
               </div>
               <VDataTable :headers="mappingHeaders" :items="mappings" :search="mappingSearch" density="compact"
-                :items-per-page="-1" hover @click:row="(_: any, { item }: any) => openEditMapping(item)"
+                :items-per-page="50" :items-per-page-options="ROWS_PER_PAGE" hover
+                @click:row="(_: any, { item }: any) => openEditMapping(item)"
                 style="cursor: pointer">
                 <template #item.enabled="{ item }">
                   <VCheckbox :model-value="item.enabled" density="compact" hide-details @click.stop
@@ -926,7 +953,7 @@ const deleteSchemaVersionConfirm = async (id: number) => {
               </div>
 
               <VDataTable :headers="listValueHeaders" :items="filteredListValues" :search="listValueSearch"
-                density="compact" :items-per-page="-1" hover
+                density="compact" :items-per-page="50" :items-per-page-options="ROWS_PER_PAGE" hover
                 @click:row="(_: any, { item }: any) => openEditListValue(item)" style="cursor: pointer">
                 <template #item.enabled="{ item }">
                   <VCheckbox
@@ -978,7 +1005,8 @@ const deleteSchemaVersionConfirm = async (id: number) => {
                   style="max-width: 320px" />
               </div>
               <VDataTable :headers="historyHeaders" :items="history" :search="historySearch" density="compact"
-                :items-per-page="-1" hover @click:row="(_: any, { item }: any) => openHistoryView(item)"
+                :items-per-page="50" :items-per-page-options="ROWS_PER_PAGE" hover
+                @click:row="(_: any, { item }: any) => openHistoryView(item)"
                 style="cursor: pointer">
                 <template #item._happened="{ item }">
                   <span :title="parseResponses(item).happened as string"
