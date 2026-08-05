@@ -41,6 +41,9 @@ const ROWS_PER_PAGE = [
   { value: -1, title: 'All' },
 ];
 
+// Mirrors BACKUP_KEEP in vite-plugin-sqlite.ts (shown in the settings copy)
+const BACKUP_KEEP = 30;
+
 const tab = ref('mappings');
 const snackbar = ref(false);
 const snackbarText = ref('');
@@ -454,6 +457,50 @@ const runHistoryImport = async () => {
   notify(`Imported ${imported} entr${imported !== 1 ? 'ies' : 'y'}`)
 }
 
+// ── Export ────────────────────────────────────────────────────────────────────
+
+const downloadFile = (content: string, filename: string, type = 'text/csv') => {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+};
+
+/** Quote a CSV cell only when it contains a delimiter, quote or newline. */
+const csvCell = (v: unknown): string => {
+  const s = v == null ? '' : Array.isArray(v) ? v.join(', ') : String(v);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+const exportHistoryCsv = () => withLoading(async () => {
+  const rows = await getFormHistory(); // newest first
+  // Union of response keys in first-seen order, so the newest schema's field
+  // order leads and fields dropped in later schemas still appear.
+  const keys: string[] = [];
+  const parsed = rows.map(r => {
+    const obj = (r.responses ? JSON.parse(r.responses) : {}) as Record<string, unknown>;
+    for (const k of Object.keys(obj)) if (!keys.includes(k)) keys.push(k);
+    return obj;
+  });
+  const lines = [['date', 'saved_at', ...keys].map(csvCell).join(',')];
+  rows.forEach((r, i) => {
+    lines.push([r.date, r.saved_at ?? '', ...keys.map(k => parsed[i][k])].map(csvCell).join(','));
+  });
+  downloadFile(lines.join('\n'), `reflection-history-${today()}.csv`);
+  notify(`Exported ${rows.length} entr${rows.length !== 1 ? 'ies' : 'y'}`);
+});
+
+const exportSqlDump = () => withLoading(async () => {
+  const res = await fetch('/api/db/dump');
+  if (!res.ok) { notify('Export failed'); return; }
+  const sql = await res.text();
+  downloadFile(sql, `reflection-db-${today()}.sql`, 'application/sql');
+  notify('SQL dump downloaded');
+});
+
 const downloadHistoryExampleCsv = () => {
   // Build example from current schema if loaded, otherwise use generic column names
   const fields = schemaFields.value.length
@@ -461,11 +508,7 @@ const downloadHistoryExampleCsv = () => {
     : ['date', 'bathe', 'wake', 'sleep', 'stress', 'tired', 'dayRating', 'feeling', 'why', 'happened']
   const header = fields.join(',')
   const example = [header, fields.map((f, i) => i === 0 ? '2025-06-01' : '').join(',')].join('\n')
-  const blob = new Blob([example], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = 'example_history.csv'; a.click()
-  URL.revokeObjectURL(url)
+  downloadFile(example, 'example_history.csv')
 }
 
 const importDialog = ref(false);
@@ -546,11 +589,7 @@ const onImportFileChange = (file: File | File[] | null) => {
 
 const downloadExampleCsv = () => {
   const { filename, example } = IMPORT_META[importTarget.value];
-  const blob = new Blob([example], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
+  downloadFile(example, filename);
 };
 
 const openImport = (target: ImportTarget) => {
@@ -1000,6 +1039,7 @@ const deleteSchemaVersionConfirm = async (id: number) => {
             <VTabsWindowItem value="history">
               <div class="d-flex align-center ga-2 mb-2">
                 <VBtn size="small" prepend-icon="mdi-upload" variant="tonal" @click="historyImportDialog = true">Import</VBtn>
+                <VBtn size="small" prepend-icon="mdi-download" variant="tonal" @click="exportHistoryCsv">Export CSV</VBtn>
                 <VTextField v-model="historySearch" density="compact" placeholder="Search…"
                   prepend-inner-icon="mdi-magnify" clearable hide-details class="flex-grow-1"
                   style="max-width: 320px" />
@@ -1158,6 +1198,21 @@ const deleteSchemaVersionConfirm = async (id: number) => {
                     min="1"
                     @change="(e: Event) => saveSetting(setting.key, (e.target as HTMLInputElement).value)"
                   />
+                </div>
+
+                <VDivider />
+
+                <div>
+                  <div class="text-subtitle-2 mb-1">Backup &amp; export</div>
+                  <div class="text-caption text-medium-emphasis mb-3">
+                    A snapshot of the database is saved automatically to the
+                    <code>backups/</code> folder next to it before the first change each day
+                    (last {{ BACKUP_KEEP }} kept). The SQL dump below is a full, portable
+                    copy — restore it with <code>sqlite3 new.db &lt; dump.sql</code>.
+                  </div>
+                  <VBtn size="small" prepend-icon="mdi-database-export" variant="tonal" @click="exportSqlDump">
+                    Download SQL dump
+                  </VBtn>
                 </div>
               </div>
             </VTabsWindowItem>

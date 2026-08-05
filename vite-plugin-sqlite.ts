@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'fs'
-import { rename, writeFile } from 'fs/promises'
+import { copyFile, mkdir, readdir, rename, unlink, writeFile } from 'fs/promises'
+import { basename, dirname, join } from 'path'
 import type { IncomingMessage, ServerResponse } from 'http'
 import type { Plugin } from 'vite'
 
@@ -76,6 +77,45 @@ INSERT OR IGNORE INTO mapping_type (id, name) VALUES
   ('phase', 'Phase');
 `
 
+/** SQL literal for a sql.js value: NULL, number, blob → x'..', else quoted text. */
+function sqlLiteral(v: unknown): string {
+  if (v === null || v === undefined) return 'NULL'
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL'
+  if (v instanceof Uint8Array) return `x'${Buffer.from(v).toString('hex')}'`
+  return `'${String(v).replace(/'/g, "''")}'`
+}
+
+/** Full schema + data as executable SQL — restorable via `sqlite3 new.db < dump.sql`. */
+function dumpSql(db: import('sql.js').Database): string {
+  const out: string[] = [
+    '-- Reflection app SQLite dump',
+    `-- Generated ${new Date().toISOString()}`,
+    'PRAGMA foreign_keys=OFF;',
+    'BEGIN TRANSACTION;',
+  ]
+  const objects = db.exec(
+    "SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY CASE type WHEN 'table' THEN 0 ELSE 1 END"
+  )
+  const rows = (objects[0]?.values ?? []) as [string, string, string][]
+
+  for (const [type, name, sql] of rows) {
+    if (type !== 'table') continue
+    out.push('', `DROP TABLE IF EXISTS "${name}";`, `${sql};`)
+    const data = db.exec(`SELECT * FROM "${name}"`)
+    if (!data[0]) continue
+    const cols = data[0].columns.map(c => `"${c}"`).join(', ')
+    for (const row of data[0].values) {
+      out.push(`INSERT INTO "${name}" (${cols}) VALUES (${row.map(sqlLiteral).join(', ')});`)
+    }
+  }
+  // Indexes/triggers/views after the data
+  for (const [type, , sql] of rows) {
+    if (type !== 'table') out.push('', `${sql};`)
+  }
+  out.push('', 'COMMIT;', '')
+  return out.join('\n')
+}
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
     let raw = ''
@@ -96,6 +136,41 @@ export function sqlitePlugin(dbPath: string): Plugin {
   let writing = false
   let writeAgain = false
 
+  // ── Daily backups ───────────────────────────────────────────────────────────
+  // Snapshots the on-disk file BEFORE the first write of each day, so each
+  // snapshot is the last known state prior to that day's edits — the useful
+  // restore point after a bad import. Copying the existing file is both
+  // cheaper than db.export() and semantically what we want.
+
+  const BACKUP_KEEP = 30
+  const BACKUP_RE = /-\d{4}-\d{2}-\d{2}\.db$/
+  let lastBackupDate: string | null = null
+
+  async function maybeBackup(): Promise<void> {
+    const today = new Date().toISOString().slice(0, 10)
+    if (lastBackupDate === today) return
+    lastBackupDate = today // set first: a failure shouldn't retry on every write
+    if (!existsSync(dbPath)) return // nothing on disk yet (first run)
+
+    const dir = join(dirname(dbPath), 'backups')
+    const stem = basename(dbPath).replace(/\.db$/, '')
+    const dest = join(dir, `${stem}-${today}.db`)
+    try {
+      await mkdir(dir, { recursive: true })
+      if (existsSync(dest)) return // already snapshotted today
+      await copyFile(dbPath, dest)
+
+      // Prune oldest — ISO dates sort lexically, so filename order is date order
+      const files = (await readdir(dir)).filter(f => f.startsWith(stem) && BACKUP_RE.test(f)).sort()
+      for (const f of files.slice(0, Math.max(0, files.length - BACKUP_KEEP))) {
+        await unlink(join(dir, f))
+      }
+      console.log(`[sqlite] backup ${dest}`)
+    } catch (e) {
+      console.error('[sqlite] backup failed:', e)
+    }
+  }
+
   /** Synchronous full write — only for process-exit handlers, where async can't finish. */
   function writeDbSync() {
     if (!db) return
@@ -115,6 +190,7 @@ export function sqlitePlugin(dbPath: string): Plugin {
     if (writing) { writeAgain = true; return }
     writing = true
     try {
+      await maybeBackup() // snapshots pre-write state on the day's first flush
       const buf = Buffer.from(db.export())
       const tmp = `${dbPath}.tmp`
       await writeFile(tmp, buf)
@@ -280,6 +356,18 @@ export function sqlitePlugin(dbPath: string): Plugin {
 
       server.middlewares.use('/api/db', async (req: IncomingMessage, res: ServerResponse, next) => {
         if (!db) { json(res, { error: 'DB not ready' }, 503); return }
+
+        // GET /api/db/dump — full SQL dump for download
+        if (req.method === 'GET' && (req.url ?? '').replace(/\/$/, '') === '/dump') {
+          try {
+            res.writeHead(200, { 'Content-Type': 'application/sql; charset=utf-8' })
+            res.end(dumpSql(db))
+          } catch (e: any) {
+            json(res, { error: e.message }, 500)
+          }
+          return
+        }
+
         if (req.method !== 'POST') { next(); return }
 
         let body: { sql: string; params?: unknown[] }
