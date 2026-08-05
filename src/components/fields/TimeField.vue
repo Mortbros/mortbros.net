@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue';
 import { VTextField } from 'vuetify/components';
-import { focusInput } from '@/lib/fieldUtils';
+import { focusInput, handleFieldNavigation } from '@/lib/fieldUtils';
 
 const props = defineProps<{
   modelValue: string;
@@ -45,17 +45,8 @@ const formatTime = () => {
   }
 };
 
-const handleKeydown = (event: KeyboardEvent) => {
-  if ((event.key === 'Enter' && !event.shiftKey) || (event.key === 'Tab' && !event.shiftKey)) {
-    event.preventDefault();
-    formatTime();
-    props.onNext?.();
-  } else if (event.key === 'Tab' && event.shiftKey) {
-    event.preventDefault();
-    formatTime();
-    props.onPrevious?.();
-  }
-};
+// Normalise the typed time (formatTime) before moving on
+const handleKeydown = (event: KeyboardEvent) => handleFieldNavigation(event, props, formatTime);
 
 defineExpose({ focus });
 

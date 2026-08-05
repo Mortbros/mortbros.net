@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
 import { VTextField } from 'vuetify/components'
+import { handleFieldNavigation } from '@/lib/fieldUtils'
 
 const props = defineProps<{
   modelValue: string[]
@@ -43,19 +44,9 @@ function save() {
   emit('update:modelValue', text.value.split(',').map(t => t.trim()).filter(Boolean))
 }
 
+// Commit the comma-separated text to the array before moving on
 function handleKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter') {
-    e.preventDefault()
-    save()
-    props.onNext?.()
-    return
-  }
-  if (e.key === 'Tab') {
-    e.preventDefault()
-    save()
-    if (e.shiftKey) props.onPrevious?.()
-    else props.onNext?.()
-  }
+  handleFieldNavigation(e, props, save)
 }
 
 function handleBlur() { save() }

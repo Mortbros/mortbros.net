@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { VTextField } from 'vuetify/components';
-import { focusInput } from '@/lib/fieldUtils';
+import { focusInput, handleFieldNavigation } from '@/lib/fieldUtils';
 
 const props = defineProps<{
   modelValue: string;
@@ -29,21 +29,15 @@ const focus = async () => {
 defineExpose({ focus });
 
 const handleKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'y' || event.key === 'Y') {
+  // Y/N set the value and advance in one keystroke
+  const key = event.key.toLowerCase();
+  if (key === 'y' || key === 'n') {
     event.preventDefault();
-    value.value = 'Y';
+    value.value = key.toUpperCase();
     props.onNext?.();
-  } else if (event.key === 'n' || event.key === 'N') {
-    event.preventDefault();
-    value.value = 'N';
-    props.onNext?.();
-  } else if ((event.key === 'Enter' && !event.shiftKey) || (event.key === 'Tab' && !event.shiftKey)) {
-    event.preventDefault();
-    props.onNext?.();
-  } else if (event.key === 'Tab' && event.shiftKey) {
-    event.preventDefault();
-    props.onPrevious?.();
+    return;
   }
+  handleFieldNavigation(event, props);
 };
 
 watch(() => props.modelValue, (newVal) => {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { VTextField } from 'vuetify/components';
-import { focusInput } from '@/lib/fieldUtils';
+import { focusInput, handleFieldNavigation } from '@/lib/fieldUtils';
 
 const props = defineProps<{
   modelValue: string;
@@ -33,19 +33,10 @@ const focus = async () => {
   await focusInput(inputRef.value);
 };
 
-const handleKeydown = (event: KeyboardEvent) => {
-  if ((event.key === 'Enter' && !event.shiftKey) || (event.key === 'Tab' && !event.shiftKey)) {
-    event.preventDefault();
-    props.onNext?.();
-  } else if (event.key === 'Tab' && event.shiftKey) {
-    event.preventDefault();
-    props.onPrevious?.();
-  }
-};
+const handleKeydown = (event: KeyboardEvent) => handleFieldNavigation(event, props);
 
-// Handle blur event to ensure validation happens when user clicks away
+// Re-emit on blur so validation runs when the user clicks away
 const handleBlur = () => {
-  // Trigger validation by updating the model value with the current value
   emit('update:modelValue', value.value);
 };
 

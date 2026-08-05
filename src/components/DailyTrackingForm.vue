@@ -5,8 +5,7 @@ import { VContainer, VRow, VCol, VCard, VCardText, VBtn, VDivider, VChip, VProgr
 import DateField from '@/components/fields/DateField.vue';
 import YesNoField from '@/components/fields/YesNoField.vue';
 import TimeField from '@/components/fields/TimeField.vue';
-import FloatField from '@/components/fields/FloatField.vue';
-import IntField from '@/components/fields/IntField.vue';
+import NumberField from '@/components/fields/NumberField.vue';
 import StringField from '@/components/fields/StringField.vue';
 import CommaListField from '@/components/fields/CommaListField.vue';
 import PlainListField from '@/components/fields/PlainListField.vue';
@@ -32,8 +31,8 @@ function getFieldComponent(type: string) {
     case 'date': return DateField
     case 'yes_no': return YesNoField
     case 'time': return TimeField
-    case 'float': return FloatField
-    case 'int': return IntField
+    case 'float': return NumberField
+    case 'int': return NumberField
     case 'string': return StringField
     case 'list': return PlainListField
     case 'autocomplete_list': return CommaListField
@@ -48,8 +47,11 @@ function getFieldProps(field: FormSchemaField): Record<string, unknown> {
     required: !!cfg.required,
   }
   switch (field.field_type) {
-    case 'float':
     case 'int':
+      base.integer = true
+      if (cfg.max != null) base.max = cfg.max
+      break
+    case 'float':
       if (cfg.max != null) base.max = cfg.max
       break
     case 'time':
