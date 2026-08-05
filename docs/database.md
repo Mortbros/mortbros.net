@@ -6,7 +6,9 @@ The app uses SQLite (via sql.js WASM) served by a Vite dev server plugin. The da
 C:\Users\sandr\OneDrive\Personal\Reflection\mappings.db
 ```
 
-The browser never touches this file directly. All reads go through `POST /api/db/query` and all writes through `POST /api/db/exec`, both served by `vite-plugin-sqlite.ts`. sql.js holds the DB in memory; writes are flushed to disk 500 ms after each exec (debounced).
+The browser never touches this file directly. Reads go through `POST /api/db/query`; writes through `POST /api/db/exec` (single) or `POST /api/db/batch` (many statements in one transaction — use this for bulk writes). `GET /api/db/dump` returns the whole database as executable SQL. All are served by `vite-plugin-sqlite.ts`.
+
+sql.js holds the DB in memory; writes are flushed to disk 500 ms after the last exec (debounced), asynchronously via a temp file and rename. Before the first write each day the file is snapshotted to `backups/mappings-YYYY-MM-DD.db`, keeping the last 30.
 
 ---
 

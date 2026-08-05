@@ -67,20 +67,23 @@ src/
   pages/
     index.vue          # Daily form page (route /)
     settings.vue       # Settings page (route /settings)
+    help.vue           # Rendered Markdown docs (route /help)
   components/
-    DailyTrackingForm.vue
+    DailyTrackingForm.vue    # Renders the active schema's fields
+    ShortcodeCheatSheet.vue  # Ctrl+/ shortcode reference overlay
     fields/
-      PatternTextField.vue   # Happened field with autocomplete
-      YesNoField.vue
-      TimeField.vue
-      FloatField.vue / IntField.vue / StringField.vue / ListField.vue
-      AutocompleteField.vue / AutocompleteListField.vue
-      DateField.vue / TimeDisplay.vue
+      PatternTextField.vue   # shortcode_text — autocomplete + pattern expansion
+      CommaListField.vue     # autocomplete_list — chips with suggestions
+      PlainListField.vue     # list — comma-separated text
+      NumberField.vue        # float and int
+      StringField.vue / YesNoField.vue
+      DateField.vue / TimeField.vue / TimeDisplay.vue
   lib/
     db.ts              # All database access (fetch → Vite middleware)
     patternMatcher.ts  # Token parsing and expansion engine
+    formSchema.ts      # YAML ⇄ form_schema_field rows
     frecency.ts        # Half-life scoring for token_usage rows
-    fieldUtils.ts      # Date helpers
+    fieldUtils.ts      # Focus, date and field-navigation helpers
   router/
     index.ts
 
@@ -90,22 +93,42 @@ mappings.db            # Runtime database (gitignored — kept in OneDrive)
 ```
 
 ### Database
-The app uses [sql.js](https://sql.js.org/) (SQLite compiled to WebAssembly) running **server-side inside the Vite dev plugin**. The browser never touches the `.db` file directly — all queries go through a tiny HTTP API served at `/api/db/query` (read) and `/api/db/exec` (write).
+The app uses [sql.js](https://sql.js.org/) (SQLite compiled to WebAssembly) running **server-side inside the Vite dev plugin**. The browser never touches the `.db` file directly — all queries go through a small HTTP API:
 
-Database location: `C:\Users\sandr\OneDrive\Personal\Reflection\mappings.db` — stored in OneDrive so it syncs across machines automatically.
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/db/query` | Read |
+| `POST /api/db/exec` | Single write |
+| `POST /api/db/batch` | Many statements in one transaction and round-trip — use for bulk writes |
+| `GET /api/db/dump` | Full schema + data as executable SQL |
 
-Writes are debounced: the HTTP response returns immediately after the in-memory `db.run()` call; the actual `writeFileSync` to disk fires 500 ms later (or synchronously on process exit / SIGINT).
+Database location defaults to `C:\Users\sandr\OneDrive\Personal\Reflection\reflection-app-data\mappings.db` (OneDrive, so it syncs across machines). Override with the `DB_PATH` environment variable — needed on Linux/Termux:
+
+```bash
+DB_PATH=$HOME/mappings.db npm run dev
+```
+
+Writes are debounced: the HTTP response returns immediately after the in-memory `db.run()`; the disk write fires 500 ms later, asynchronously so it never blocks the event loop, writing to a temp file and renaming so a crash mid-write can't corrupt the database. Process exit / SIGINT flush synchronously.
+
+**Backups:** before the first write each day the current file is copied to `backups/mappings-YYYY-MM-DD.db` beside the database, keeping the last 30. Each snapshot is the state *before* that day's edits.
 
 #### Schema
 
+Full DDL in [`schema.sql`](schema.sql); per-column reference in [`docs/database.md`](docs/database.md).
+
 ```sql
-mapping_type     (id PK, name)
-list_values      (id PK, value, type_id, abbreviation UNIQUE per type, enabled)
-mapping_instance (id PK, name UNIQUE, expansion, enabled)
-token_usage      (id PK, raw_input, mapping_name, expansion, used_at)
-app_settings     (key PK, value)
-form_history     (date PK, bathe, wake, sleep, … happened, output, saved_at)
+mapping_type        (id PK, name)
+list_values         (id PK, value, type_id, abbreviation UNIQUE per type, enabled)
+mapping_instance    (id PK, name UNIQUE, expansion, enabled, grp)
+token_usage         (id PK, raw_input, mapping_name, expansion, used_at)
+app_settings        (key PK, value)
+form_history        (date PK, output, saved_at, responses JSON, schema_version_id)
+form_schema_version (id PK, effective_from UNIQUE, note)
+form_schema_field   (id PK, version_id, field_key, label, field_type, config JSON, row_group, sort_order)
 ```
+
+`form_history.responses` is a JSON object keyed by `field_key` — the legacy fixed
+columns were migrated into it and dropped.
 
 ---
 
@@ -168,4 +191,4 @@ npm run type-check    # TypeScript check (vue-tsc)
 npm run build         # Production build
 ```
 
-The database is never committed — `mappings.db`, `/src/assets/*`, and `/public/mappings.db` are all gitignored. A reference `schema.sql` is committed for documentation purposes.
+The database is never committed — `mappings.db` and `/public/mappings.db` are gitignored. A reference [`schema.sql`](schema.sql) (structure only, no personal data) is committed for documentation; regenerate it from the `SCHEMA` constant in `vite-plugin-sqlite.ts` if you change the tables.
