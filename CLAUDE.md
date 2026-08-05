@@ -75,6 +75,8 @@ src/lib/db.ts                  All DB access functions (typed wrappers around fe
 src/lib/formSchema.ts          YAML parser/serialiser for form_schema_version definitions
 src/lib/patternMatcher.ts      Token parser and expansion engine
 src/lib/frecency.ts            Half-life frecency scoring for token_usage rows
+src/lib/fieldUtils.ts          focusInput, date helpers, handleFieldNavigation
+schema.sql                     Reference DDL — regenerate from SCHEMA if tables change
 src/components/
   DailyTrackingForm.vue        Dynamic form renderer — driven by active schema from DB
   fields/
@@ -233,8 +235,8 @@ Field types map to components in `src/components/fields/`:
 | `yes_no` | `YesNoField.vue` | |
 | `time` | `TimeField.vue` | |
 | `time_display` | `TimeDisplay.vue` | Read-only; excluded from clipboard output |
-| `float` | `FloatField.vue` | |
-| `int` | `IntField.vue` | |
+| `float` | `NumberField.vue` | |
+| `int` | `NumberField.vue` | Same component, `integer` prop set |
 | `string` | `StringField.vue` | |
 
 All fields inherit compact density from the global Vuetify defaults in `src/main.ts`:
@@ -270,6 +272,21 @@ After any chip add, `clearInput()` resets both the reactive `searchText` ref AND
 - `getEmptyValue(field)` helper in `DailyTrackingForm` reads `config.emptyValue` (also accepts legacy `defaultN: true` for backward compat)
 - `vite-plugin-sqlite.ts` includes a migration that converts any `defaultN: true` in existing DBs to `emptyValue: "N"`
 - `persistNewListValues` skips the emptyValue string so it isn't added to the suggestion list
+
+---
+
+## Field component conventions
+
+Every field component follows the same shape: `modelValue` + `label` props, an
+`update:modelValue` emit, `defineExpose({ focus })` so `DailyTrackingForm` can
+drive focus order, and `handleFieldNavigation(event, props)` for keyboard nav.
+Pass a `beforeNavigate` callback when the field must commit before moving on.
+
+Two exceptions, both deliberate:
+- `PatternTextField` and `CommaListField` own their keydown handling entirely
+  (dropdown navigation, capture-phase interception) and don't use the helper.
+- `DateField` declares only `onPrevious`, so **Enter does not advance from the
+  date field** even though the parent passes `on-next`. Pre-existing; left as-is.
 
 ---
 
