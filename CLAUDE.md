@@ -54,7 +54,16 @@ Database path: `C:\Users\sandr\OneDrive\Personal\Reflection\mappings.db`
 
 The browser never accesses the `.db` file directly. All DB calls in `src/lib/db.ts` go through `fetch()` to these endpoints. sql.js holds the database **in memory** on the server side.
 
-**Writes are debounced:** `exec` returns immediately after `db.run()`; `writeFileSync` fires 500 ms later. Process exit / SIGINT / SIGTERM trigger a synchronous flush so no data is lost.
+Three endpoints:
+
+- `POST /api/db/query` — read (returns sql.js result array)
+- `POST /api/db/exec` — single write (returns `{ ok: true }`)
+- `POST /api/db/batch` — many statements in ONE transaction and round-trip; returns `{ applied, failed }`. Individual failures are skipped and reported, not fatal. **Use this for bulk writes** — awaiting `exec` in a loop is ~77x slower.
+- `GET  /api/db/dump` — full schema + data as executable SQL
+
+**Writes are debounced:** `exec` returns immediately after `db.run()`; the disk write fires 500 ms later, **async** via `fs/promises` so it never blocks the event loop. It writes to `<db>.tmp` then renames, so a crash mid-write can't corrupt the DB; overlapping flushes coalesce. Process exit / SIGINT / SIGTERM trigger a *synchronous* flush so no data is lost.
+
+**Daily backups:** before the first write of each day, the on-disk file is copied to `backups/mappings-YYYY-MM-DD.db` beside the DB, keeping the last 30 (`BACKUP_KEEP`). The snapshot is the state *before* that day's edits — the restore point you want after a bad import. Copying the file is cheaper than `db.export()`. Backup failures are logged and never block a write.
 
 ---
 
@@ -180,10 +189,10 @@ In manual mode: space-press expansion and dropdown disabled
 | `mappings` | CRUD for mapping_instance; toggle enabled; CSV import; `grp` column shown |
 | `listValues` | CRUD for list_values; sub-tabs per type; CSV import (label: "Lists") |
 | `types` | Create/rename/delete mapping_type; rename propagates to all references |
-| `history` | View/delete form_history rows; click row for read-only dialog; TSV/CSV bulk import |
+| `history` | View/delete form_history rows; click row for read-only dialog; TSV/CSV bulk import; CSV export |
 | `scan` | Merged Conflicts + Suggestions — run each scan independently with a button |
 | `test` | Debug a specific token against all mappings |
-| `appSettings` | Edit app_settings values (frecency, suggestion tuning) |
+| `appSettings` | Edit app_settings values (frecency, suggestion tuning); SQL dump export |
 | `schema` | YAML editor + version list for form schema management |
 
 Tab switch animations are disabled via CSS (`transition: none !important` on `.v-window__container` and `.v-window-item`).
@@ -277,7 +286,11 @@ After any chip add, `clearInput()` resets both the reactive `searchText` ref AND
 - **`defaultN` is deprecated** — use `emptyValue` instead. Backward compat remains in `getEmptyValue()`.
 - **Grouped field rows** (`row_group`) use `flex: 1 1 0; min-width: 0` on each VCol with `flex-wrap: nowrap` on the VRow — equal widths, never wraps. Don't reintroduce breakpoint cols there.
 - **Mobile layout**: the form card is `pa-1 pa-sm-6` with border/shadow removed under 600px (`.form-card` media query) for full-bleed width.
-- **Form header** has YouTube (`mdi-youtube`) and My Activity (`mdi-google`) icon buttons mirroring the Ctrl+Y / Ctrl+G shortcuts handled in `App.vue` (Ctrl+S dispatches the `app:copy` custom event).
+- **Form header** has shortcode-reference (`mdi-keyboard-outline`), YouTube (`mdi-youtube`) and My Activity (`mdi-google`) icon buttons mirroring the Ctrl+/ , Ctrl+Y and Ctrl+G shortcuts handled in `App.vue`. Ctrl+S and Ctrl+/ dispatch the `app:copy` / `app:cheatsheet` custom events, which `DailyTrackingForm` listens for.
+- **`window` is not in Vue template scope** — `@click="window.open(...)"` fails silently. Define a script-scope method and bind that.
+- **Settings tables are paginated** (`ROWS_PER_PAGE`, default 50). Don't reintroduce `items-per-page="-1"` on mappings/list values/history — it renders every row and is the main cost on mobile.
+- **Row toggles update locally**, not via a full `refresh()`. Refetching re-reads ~1300 rows and re-renders every table for one checkbox; the handlers revert the local row if the write fails.
+- **`?` is not a keyboard trigger** anywhere — it's a character typed in the Happened field. The cheat-sheet uses Ctrl+/.
 
 ---
 
