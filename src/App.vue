@@ -9,6 +9,9 @@ const onKeydown = (e: KeyboardEvent) => {
   if (e.key === 'y') { e.preventDefault(); window.open('https://www.youtube.com/feed/history', '_blank'); }
   if (e.key === 's') { e.preventDefault(); document.dispatchEvent(new CustomEvent('app:copy')); }
   if (e.key === 'g') { e.preventDefault(); window.open('https://myactivity.google.com/myactivity?pli=1', '_blank'); }
+  // Ctrl+/ toggles the shortcode reference. '?' is not used as a trigger — it's
+  // a character you type in the Happened field.
+  if (e.key === '/') { e.preventDefault(); document.dispatchEvent(new CustomEvent('app:cheatsheet')); }
 };
 
 onMounted(() => document.addEventListener('keydown', onKeydown));

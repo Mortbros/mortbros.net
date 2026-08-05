@@ -12,6 +12,7 @@ import CommaListField from '@/components/fields/CommaListField.vue';
 import PlainListField from '@/components/fields/PlainListField.vue';
 import PatternTextField from '@/components/fields/PatternTextField.vue';
 import TimeDisplay from '@/components/fields/TimeDisplay.vue';
+import ShortcodeCheatSheet from '@/components/ShortcodeCheatSheet.vue';
 import { getTodayDate, getYesterdayDate } from '@/lib/fieldUtils';
 import {
   getMappingInstances, getListValues, getSuggestions, upsertFormHistory,
@@ -409,8 +410,29 @@ const handleClearButtonKeydown = (event: KeyboardEvent) => {
 }
 
 const onAppCopy = () => copyToClipboard()
-onMounted(() => document.addEventListener('app:copy', onAppCopy))
-onUnmounted(() => document.removeEventListener('app:copy', onAppCopy))
+
+// Shortcode reference overlay (Ctrl+/ via App.vue, or the header icon)
+const cheatSheetOpen = ref(false)
+const onAppCheatSheet = () => { cheatSheetOpen.value = !cheatSheetOpen.value }
+
+// Shown in the reference: every mapping the shortcode fields can see
+const cheatSheetMappings = computed(() => {
+  const seen = new Set<number>()
+  const all: MappingInstance[] = []
+  for (const list of dbMappingsByGroup.value.values()) {
+    for (const m of list) if (!seen.has(m.id)) { seen.add(m.id); all.push(m) }
+  }
+  return all
+})
+
+onMounted(() => {
+  document.addEventListener('app:copy', onAppCopy)
+  document.addEventListener('app:cheatsheet', onAppCheatSheet)
+})
+onUnmounted(() => {
+  document.removeEventListener('app:copy', onAppCopy)
+  document.removeEventListener('app:cheatsheet', onAppCheatSheet)
+})
 
 // `window` is not in template scope — these mirror the Ctrl+Y / Ctrl+G shortcuts
 const openYouTube = () => window.open('https://www.youtube.com/feed/history', '_blank')
@@ -446,6 +468,8 @@ onMounted(async () => {
                     Clear
                   </VBtn>
                 </div>
+                <VBtn icon="mdi-keyboard-outline" variant="text" size="small" title="Shortcode reference (Ctrl+/)"
+                  @click="cheatSheetOpen = true" />
                 <VBtn icon="mdi-youtube" variant="text" size="small" title="YouTube history (Ctrl+Y)"
                   @click="openYouTube" />
                 <VBtn icon="mdi-google" variant="text" size="small" title="My Activity (Ctrl+G)"
@@ -554,6 +578,12 @@ onMounted(async () => {
         </VCard>
       </VCol>
     </VRow>
+
+    <ShortcodeCheatSheet
+      v-model="cheatSheetOpen"
+      :mappings="cheatSheetMappings"
+      :list-values="dbListValues"
+    />
   </VContainer>
 </template>
 
